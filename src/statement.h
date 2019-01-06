@@ -21,37 +21,38 @@ namespace node_sqlite3 {
 
 namespace Values {
     struct Field {
-        inline Field(unsigned short _index, unsigned short _type = SQLITE_NULL) :
-            type(_type), index(_index) {}
-        inline Field(const char* _name, unsigned short _type = SQLITE_NULL) :
-            type(_type), index(0), name(_name) {}
+        inline Field(unsigned short _index, unsigned short _type, const char* _decltype = "") :
+            type(_type), index(_index), decl_t(_decltype) {}
+        inline Field(const char* _name, unsigned short _type, const char* _decltype = "") :
+            type(_type), index(0), name(_name), decl_t(_decltype) {}
 
         unsigned short type;
         unsigned short index;
         std::string name;
+        std::string decl_t;
     };
 
     struct Integer : Field {
-        template <class T> inline Integer(T _name, int64_t val) :
-            Field(_name, SQLITE_INTEGER), value(val) {}
+        template <class T> inline Integer(T _name, int64_t val, const char* _decltype = "") :
+            Field(_name, SQLITE_INTEGER, _decltype), value(val) {}
         int64_t value;
     };
 
     struct Float : Field {
-        template <class T> inline Float(T _name, double val) :
-            Field(_name, SQLITE_FLOAT), value(val) {}
+        template <class T> inline Float(T _name, double val, const char* _decltype = "") :
+            Field(_name, SQLITE_FLOAT, _decltype), value(val) {}
         double value;
     };
 
     struct Text : Field {
-        template <class T> inline Text(T _name, size_t len, const char* val) :
-            Field(_name, SQLITE_TEXT), value(val, len) {}
+        template <class T> inline Text(T _name, size_t len, const char* val, const char* _decltype = "") :
+            Field(_name, SQLITE_TEXT, _decltype), value(val, len) {}
         std::string value;
     };
 
     struct Blob : Field {
-        template <class T> inline Blob(T _name, size_t len, const void* val) :
-                Field(_name, SQLITE_BLOB), length(len) {
+        template <class T> inline Blob(T _name, size_t len, const void* val, const char* _decltype = "") :
+                Field(_name, SQLITE_BLOB, _decltype), length(len) {
             value = (char*)malloc(len);
             memcpy(value, val, len);
         }

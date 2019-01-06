@@ -181,7 +181,7 @@ template <class T> Values::Field*
         return new Values::Integer(pos, Nan::To<bool>(source).FromJust() ? 1 : 0);
     }
     else if (source->IsNull()) {
-        return new Values::Null(pos);
+        return new Values::Null(pos, SQLITE_NULL);
     }
     else if (Buffer::HasInstance(source)) {
         Local<Object> buffer = Nan::To<Object>(source).ToLocalChecked();
@@ -749,10 +749,11 @@ void Statement::Work_AfterReset(uv_work_t* req) {
 Local<Object> Statement::RowToJS(Row* row) {
     Nan::EscapableHandleScope scope;
 
-    Local<Object> result = Nan::New<Object>();
+    Local<Array> result = Nan::New<Array>();
 
     Row::const_iterator it = row->begin();
     Row::const_iterator end = row->end();
+    int i = 0;
     for (int i = 0; it < end; ++it, i++) {
         Values::Field* field = *it;
 
@@ -776,39 +777,48 @@ Local<Object> Statement::RowToJS(Row* row) {
             } break;
         }
 
-        Nan::Set(result, Nan::New(field->name.c_str()).ToLocalChecked(), value);
+        Local<Object> fieldjs = Nan::New<Object>();
+        Local<String> decl_t = Nan::New<String>(field->decl_t.c_str(), field->decl_t.size()).ToLocalChecked();
+        Nan::Set(fieldjs, Nan::New("decltype").ToLocalChecked(), decl_t);
+        Nan::Set(fieldjs, Nan::New("name").ToLocalChecked(), Nan::New(field->name.c_str()).ToLocalChecked());
+        Nan::Set(fieldjs, Nan::New("value").ToLocalChecked(), value);
+
+        Nan::Set(result, i, fieldjs);
 
         DELETE_FIELD(field);
+        i++;
     }
 
     return scope.Escape(result);
 }
 
 void Statement::GetRow(Row* row, sqlite3_stmt* stmt) {
-    int rows = sqlite3_column_count(stmt);
+    int cols = sqlite3_column_count(stmt);
 
-    for (int i = 0; i < rows; i++) {
+    for (int i = 0; i < cols; i++) {
         int type = sqlite3_column_type(stmt, i);
         const char* name = sqlite3_column_name(stmt, i);
+        const char* decl_t = sqlite3_column_decltype(stmt, i);
+
         switch (type) {
             case SQLITE_INTEGER: {
-                row->push_back(new Values::Integer(name, sqlite3_column_int64(stmt, i)));
+                row->push_back(new Values::Integer(name, sqlite3_column_int64(stmt, i), decl_t != NULL ? decl_t : ""));
             }   break;
             case SQLITE_FLOAT: {
-                row->push_back(new Values::Float(name, sqlite3_column_double(stmt, i)));
+                row->push_back(new Values::Float(name, sqlite3_column_double(stmt, i), decl_t != NULL ? decl_t : ""));
             }   break;
             case SQLITE_TEXT: {
                 const char* text = (const char*)sqlite3_column_text(stmt, i);
                 int length = sqlite3_column_bytes(stmt, i);
-                row->push_back(new Values::Text(name, length, text));
+                row->push_back(new Values::Text(name, length, text, decl_t != NULL ? decl_t : ""));
             } break;
             case SQLITE_BLOB: {
                 const void* blob = sqlite3_column_blob(stmt, i);
                 int length = sqlite3_column_bytes(stmt, i);
-                row->push_back(new Values::Blob(name, length, blob));
+                row->push_back(new Values::Blob(name, length, blob, decl_t != NULL ? decl_t : ""));
             }   break;
             case SQLITE_NULL: {
-                row->push_back(new Values::Null(name));
+                row->push_back(new Values::Null(name, SQLITE_NULL, decl_t != NULL ? decl_t : ""));
             }   break;
             default:
                 assert(false);
