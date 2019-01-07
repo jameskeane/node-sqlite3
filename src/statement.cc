@@ -753,7 +753,6 @@ Local<Object> Statement::RowToJS(Row* row) {
 
     Row::const_iterator it = row->begin();
     Row::const_iterator end = row->end();
-    int i = 0;
     for (int i = 0; it < end; ++it, i++) {
         Values::Field* field = *it;
 
@@ -786,7 +785,6 @@ Local<Object> Statement::RowToJS(Row* row) {
         Nan::Set(result, i, fieldjs);
 
         DELETE_FIELD(field);
-        i++;
     }
 
     return scope.Escape(result);
