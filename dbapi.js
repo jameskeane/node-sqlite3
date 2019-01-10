@@ -36,6 +36,10 @@ class Row {
   slice(begin, end) {
     return new Row(this.__cols.slice(begin, end));
   }
+
+  toArray() {
+    return this.__cols.map((col) => col.value);
+  }
 }
 
 
@@ -106,11 +110,23 @@ class Cursor {
         if (err) {
           reject(err);
         } else {
-          // todo transform
           resolve(this._convertRow(row));
         }
       });
     });
+  }
+
+  async fetchmany(count) {
+    if (!this._active_stmt) return null;
+
+    // todo implement this in c++
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const row = await this.fetchone();
+      if (!row) break;
+      result.push(row);
+    }
+    return result;
   }
 
   async fetchall() {
@@ -149,6 +165,8 @@ class Cursor {
   }
 
   _convertRow(row) {
+    if (!row) return row;
+
     const converted = [];
     for (let { name, decltype, value } of row) {
       let converted_value = value;
@@ -180,6 +198,18 @@ class DatabaseWrapper {
 
   cursor(factory=Cursor) {
     return new factory(this._db, this.detect_types);
+  }
+
+  async close() {
+    return new Promise((resolve, reject) => {
+      this._db.close((err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      })
+    })
   }
 
   async commit() {
