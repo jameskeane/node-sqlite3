@@ -46,8 +46,10 @@ class Row {
 class Cursor {
   constructor(db, detect_types) {
     this._active_stmt = null;
-    this._db = db;
+    this._wrapper = db;
+    this._db = db._db;
     this._detect_types = detect_types;
+    this._wrapper._register_cursor(this);
   }
 
   [Symbol.asyncIterator]() {
@@ -153,6 +155,7 @@ class Cursor {
 
     return new Promise((resolve, reject) => {
       this._active_stmt.finalize((err) => {
+        this._wrapper._unregister_cursor(this);
         this._active_stmt = null;
 
         if (err) {
@@ -194,13 +197,30 @@ class DatabaseWrapper {
   constructor(db, options) {
     this._db = db;
     this.detect_types = options.detect_types;
+    this._isolation_level = null;
+    this._begin_statement = null;
+    this._cursors = new Set();
   }
 
   cursor(factory=Cursor) {
-    return new factory(this._db, this.detect_types);
+    return new factory(this, this.detect_types);
+  }
+
+  async _init() {
+    await this.set_isolation_level('');
+    return this;
   }
 
   async close() {
+    for (let cursor of this._cursors) {
+      try {
+        await cursor.close();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    this._cursors.clear();
+
     return new Promise((resolve, reject) => {
       this._db.close((err) => {
         if (err) {
@@ -212,9 +232,27 @@ class DatabaseWrapper {
     })
   }
 
+  get isolation_level() {
+    return this._isolation_level;
+  }
+
+  async set_isolation_level(isolation_level) {
+    if (isolation_level === null) {
+      this._isolation_level = null;
+      await this.commit();
+    } else {
+      this._isolation_level = isolation_level;
+      this._begin_statement = `BEGIN ${isolation_level}`;
+    }
+  }
+
   async commit() {
-    await _exec_helper(this._db, 'COMMIT');
-    await _exec_helper(this._db, 'BEGIN');
+    if (this._db.autocommit) return;
+    await this.execute('COMMIT');
+  }
+
+  async begin() {
+    await this.execute(this._begin_statement);
   }
 
   async execute(sql, params=[]) {
@@ -235,6 +273,14 @@ class DatabaseWrapper {
     await _exec_helper(this._db, 'ROLLBACK');
     await _exec_helper(this._db, 'BEGIN');
   }
+
+  _register_cursor(cursor) {
+    this._cursors.add(cursor);
+  }
+
+  _unregister_cursor(cursor) {
+    this._cursors.delete(cursor);
+  }
 }
 
 
@@ -251,13 +297,8 @@ function connect(opts) {
       }
 
       db.serialize(() => {
-        db.exec('BEGIN', (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(new DatabaseWrapper(db, opts));
-          }
-        });
+        const wrapper = new DatabaseWrapper(db, opts);
+        wrapper._init().then(resolve, reject);
       });
     }
   });

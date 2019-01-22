@@ -153,6 +153,7 @@ protected:
     static NAN_METHOD(Configure);
 
     static NAN_METHOD(Interrupt);
+    static NAN_GETTER(Autocommit);
 
     static void SetBusyTimeout(Baton* baton);
 

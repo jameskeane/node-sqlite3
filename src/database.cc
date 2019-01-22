@@ -26,6 +26,7 @@ NAN_MODULE_INIT(Database::Init) {
     Nan::SetPrototypeMethod(t, "interrupt", Interrupt);
 
     NODE_SET_GETTER(t, "open", OpenGetter);
+    NODE_SET_GETTER(t, "autocommit", Autocommit);
 
     constructor_template.Reset(t);
 
@@ -515,6 +516,12 @@ NAN_METHOD(Database::Exec) {
     db->Schedule(Work_BeginExec, baton, true);
 
     info.GetReturnValue().Set(info.This());
+}
+
+NAN_GETTER(Database::Autocommit) {
+    Database* db = Nan::ObjectWrap::Unwrap<Database>(info.This());
+    bool autocommit = sqlite3_get_autocommit(db->_handle) ? true : false;
+    info.GetReturnValue().Set(autocommit);
 }
 
 void Database::Work_BeginExec(Baton* baton) {
