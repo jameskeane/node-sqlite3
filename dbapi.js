@@ -45,11 +45,13 @@ class Row {
 
 class Cursor {
   constructor(db, detect_types) {
+    this._pending_stmt = null;
     this._active_stmt = null;
     this._wrapper = db;
     this._db = db._db;
     this._detect_types = detect_types;
     this._wrapper._register_cursor(this);
+    this._needs_reset_before_get = false;
   }
 
   [Symbol.asyncIterator]() {
@@ -64,48 +66,67 @@ class Cursor {
         // int type = sqlite3_column_type(stmt, i);
         // const char* name = sqlite3_column_name(stmt, i);
 
+  _reset_before_read() {
+    // hacky work around for issue with node-sqlite3 lib, doing a run + get
+    // skips the first row. So we need to reset the row pointer only once before
+    // the first read.
+    if (!this._active_stmt || !this._needs_reset_before_get) return;
+
+    return new Promise((resolve, reject) => {
+      this._active_stmt.reset(() => {
+        this._needs_reset_before_get = false;
+        resolve();
+      });
+    });
+  }
 
   execute(sql, params=[]) {
     const self = this;
 
     // map params
     params = params.map((p) => {
-      if (typeof p !== 'object') return p;
+      if (p === null || p === undefined || typeof p !== 'object') return p;
 
       const adapter = registered_adapters.get(p.constructor);
       if (!adapter) return p;
       return adapter(p);
     });
 
-    return new ExecuteIterator((resolve, reject) => {
+    this._pending_stmt = new ExecuteIterator((resolve, reject) => {
       this._finalize_active()
         .then(() => {
           const stmt = this._db
               .prepare(sql, params)
-              .run(function(err) {
+              .run((err) => {
                 if (err) {
                   reject(err);
                   return;
                 }
                 // self._db.total_changes = this.changes;
                 self.lastrowid = this.lastID;
-              })
-              .reset((err) => {  // seems like a but that I have to reset
-                if (err) {
-                  reject(err);
-                  return;
-                }
-
+                self._pending_stmt = null;
                 self._active_stmt = stmt;
+                self._needs_reset_before_get = true;
                 resolve(self);
               });
+              // .reset((err) => {  // seems like a but that I have to reset
+              //   if (err) {
+              //     reject(err);
+              //     return;
+              //   }
+
+              //   self._active_stmt = stmt;
+              //   resolve(self);
+              // });
         })
         .catch((err) => reject(err));
     });
+    return this._pending_stmt;
   }
 
   async fetchone() {
     if (!this._active_stmt) return null;
+    await this._reset_before_read();
 
     return new Promise((resolve, reject) => {
       this._active_stmt.get((err, row) => {
@@ -120,6 +141,7 @@ class Cursor {
 
   async fetchmany(count) {
     if (!this._active_stmt) return null;
+    await this._reset_before_read();
 
     // todo implement this in c++
     const result = [];
@@ -133,6 +155,7 @@ class Cursor {
 
   async fetchall() {
     if (!this._active_stmt) return null;
+    await this._reset_before_read();
 
     return new Promise((resolve, reject) => {
       this._active_stmt.all((err, rows) => {
@@ -148,23 +171,30 @@ class Cursor {
 
   async close() {
     await this._finalize_active();
+    this._wrapper._unregister_cursor(this);
   }
 
   async _finalize_active() {
-    if (!this._active_stmt) return Promise.resolve();
-
-    return new Promise((resolve, reject) => {
-      this._active_stmt.finalize((err) => {
-        this._wrapper._unregister_cursor(this);
-        this._active_stmt = null;
-
-        if (err) {
-          reject(err);
-        } else {
+    if (this._pending_stmt) {
+      return this._pending_stmt.then((stmt) => new Promise((resolve, reject) => {
+        stmt.finalize(() => {
+          this._pending_stmt = null;
           resolve();
-        }
+        });
+      }));
+    } else if (this._active_stmt) {
+      return new Promise((resolve, reject) => {
+        this._active_stmt.finalize((err) => {
+          this._active_stmt = null;
+
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
       });
-    });
+    }
   }
 
   _convertRow(row) {
@@ -253,6 +283,10 @@ class DatabaseWrapper {
 
   async begin() {
     await this.execute(this._begin_statement);
+  }
+
+  async rollback() {
+    throw new Error('todo');
   }
 
   async execute(sql, params=[]) {
