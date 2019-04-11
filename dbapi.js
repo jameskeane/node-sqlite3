@@ -103,7 +103,8 @@ class Cursor {
                   return;
                 }
                 // self._db.total_changes = this.changes;
-                self.lastrowid = this.lastID;
+                self.lastrowid = stmt.lastID;
+                this.rowcount = stmt.changes;
                 self._pending_stmt = null;
                 self._active_stmt = stmt;
                 self._needs_reset_before_get = true;
